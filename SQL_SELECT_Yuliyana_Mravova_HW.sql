@@ -22,8 +22,8 @@ SELECT f.title,
 		f.rental_rate, 
 		f.rating 
 FROM public.film AS f 
-INNER JOIN public.film_category AS fc  	ON fc.film_id 		= f.film_id 
-INNER JOIN public.category 		AS c 	ON c.category_id  	= fc.category_id 
+INNER JOIN public.film_category AS fc  ON fc.film_id = f.film_id 
+INNER JOIN public.category AS c 		ON c.category_id  = fc.category_id 
 WHERE UPPER(c.name) = 'ANIMATION' 
 	AND f.release_year BETWEEN 2017 AND 2019 
 	AND f.rental_rate > 1
@@ -34,17 +34,17 @@ ORDER BY f.title ASC;
 --DISADVANTAGES: Unnecessary logic for simple filtering tasks, which can unnecessarily consume memory.
 WITH animation_films AS(
 	SELECT fc.film_id 
-	FROM public.film_category 	AS fc 
-	JOIN public.category 		AS c ON c.category_id = fc.category_id 
-	WHERE c.name = 'Animation'
+	FROM public.film_category AS fc 
+	JOIN public.category AS c ON c.category_id = fc.category_id 
+	WHERE UPPER(c.name) = 'ANIMATION'
 )
 SELECT f.title, 
 		f.description, 
 		f.release_year, 
 		f.rental_rate, 
 		f.rating 
-FROM public.film 		AS f
-JOIN animation_films 	AS af ON f.film_id = af.film_id 
+FROM public.film AS f
+JOIN animation_films AS af ON f.film_id = af.film_id 
 WHERE f.release_year BETWEEN 2017 AND 2019 
 		AND f.rental_rate > 1
 ORDER BY f.title ASC;
@@ -59,16 +59,16 @@ SELECT f.title,
 		f.rating 
 FROM public.film AS f 
 WHERE f.release_year BETWEEN 2017 AND 2019 
-	AND f.rental_rate > 1
-	AND f.film_id IN (
-		SELECT fc.film_id 
-		FROM public.film_category AS fc 
-		WHERE fc.category_id IN (
-			SELECT c.category_id  
-			FROM public.category AS c
-			WHERE c.name = 'Animation'
+		AND f.rental_rate > 1
+		AND f.film_id IN (
+						SELECT fc.film_id 
+						FROM public.film_category AS fc 
+						WHERE fc.category_id IN (
+												SELECT c.category_id  
+												FROM public.category AS c
+												WHERE UPPER(c.name) = 'ANIMATION'
+						)
 		)
-)
 ORDER BY f.title ASC;
 
 
@@ -90,57 +90,55 @@ ORDER BY f.title ASC;
 --SOLUTION USING JOIN
 --ADVANTAGES: It is very readable
 --DISADVANTAGES: The database joins all rows from payment before it perfroms the grouping(causes high memory usage)
-SELECT COALESCE(addr.address, '') || ' ' || COALESCE(addr.address2, '') AS store_address,
-       SUM(pay.amount)                                                  AS revenue
+SELECT TRIM(COALESCE(adr.address, '') || ' ' || COALESCE(adr.address2, '')) AS store_address,
+       SUM(pay.amount)                                                      AS total_revenue
 FROM public.store str
-INNER JOIN public.address addr ON str.address_id = addr.address_id
-INNER JOIN public.staff   stf  ON str.store_id   = stf.store_id
-INNER JOIN public.payment pay  ON stf.staff_id   = pay.staff_id
+INNER JOIN public.address   adr ON str.address_id   = adr.address_id
+INNER JOIN public.inventory inv ON str.store_id     = inv.store_id
+INNER JOIN public.rental    rnt ON inv.inventory_id = rnt.inventory_id
+INNER JOIN public.payment   pay ON rnt.rental_id    = pay.rental_id
 WHERE pay.payment_date >= '2017-04-01'
 GROUP BY str.store_id, 
-         addr.address, 
-         addr.address2;
+         adr.address, 
+         adr.address2;
 /*SOLUTION USING CTE - The best approach for this task that I would use in production 
  * because the payment table is the largest of them all. The staff_revenue CTE 
  * handles the aggregation for this table and joins it already optimized and filtered 
  * to the othrer tables. The CTE approach ensures superior code readability here.*/ 
 --ADVANTAGES: It separates the business logic from the formatting logic, readable, and easier to follow the relations and the logical approach to the database. 
 --DISADVANTAGES: More code.
-WITH staff_revenue AS (
-    SELECT pay.staff_id, 
-           SUM(pay.amount) AS staff_revenue
-    FROM public.payment pay 
+WITH store_payments AS (
+    SELECT inv.store_id,
+           SUM(pay.amount) AS total_store_revenue
+    FROM public.payment pay
+    INNER JOIN public.rental    rnt ON pay.rental_id    = rnt.rental_id
+    INNER JOIN public.inventory inv ON rnt.inventory_id = inv.inventory_id
     WHERE pay.payment_date >= '2017-04-01'
-    GROUP BY pay.staff_id
-),
-store_revenue AS (
-    SELECT stf.store_id, 
-           SUM(srev.staff_revenue) AS store_revenue
-    FROM public.staff stf
-    INNER JOIN staff_revenue srev ON stf.staff_id = srev.staff_id
-    GROUP BY stf.store_id 
+    GROUP BY inv.store_id
 )
-SELECT COALESCE(addr.address, '') || ' ' || COALESCE(addr.address2, '') AS store_address,
-       strev.store_revenue                                              AS revenue
+SELECT TRIM(COALESCE(adr.address, '') || ' ' || COALESCE(adr.address2, '')) AS store_address,
+       spm.total_store_revenue                                              AS total_revenue
 FROM public.store str
-INNER JOIN public.address addr  ON str.address_id = addr.address_id
-INNER JOIN store_revenue  strev ON str.store_id   = strev.store_id;
+INNER JOIN public.address       adr ON str.address_id = adr.address_id
+INNER JOIN store_payments       spm ON str.store_id   = spm.store_id;
 
 --SOLUTION USING SUBQUERIES
 --ADVANTAGES: Aggregates the large payment table first before joining the other tables
 --DISADVANTAGES: Harder to read.
-SELECT COALESCE(addr.address, '') || ' ' || COALESCE(addr.address2, '') AS store_address,
-       store_rev.store_revenue                                          AS revenue
+SELECT TRIM(COALESCE(adr.address, '') || ' ' || COALESCE(adr.address2, '')) AS store_address,
+       sub.total_store_revenue                                              AS total_revenue
 FROM public.store str
-INNER JOIN public.address addr ON str.address_id = addr.address_id
+INNER JOIN public.address adr ON str.address_id = adr.address_id
 INNER JOIN (
-    SELECT stf.store_id, 
-           SUM(pay.amount) AS store_revenue
-    FROM public.staff stf
-    INNER JOIN public.payment pay ON stf.staff_id = pay.staff_id
+    SELECT inv.store_id, 
+           SUM(pay.amount) AS total_store_revenue
+    FROM public.payment pay
+    INNER JOIN public.rental    rnt ON pay.rental_id    = rnt.rental_id
+    INNER JOIN public.inventory inv ON rnt.inventory_id = inv.inventory_id
     WHERE pay.payment_date >= '2017-04-01'
-    GROUP BY stf.store_id 
-) AS store_rev ON str.store_id = store_rev.store_id;
+    GROUP BY inv.store_id 
+) AS sub ON str.store_id = sub.store_id;
+
 
 
 /*3.The marketing department in our stores aims to identify 
@@ -161,18 +159,13 @@ INNER JOIN (
 --SOLUTION USING JOIN
 --ADVANTAGES: Compact, readable and simple.
 --DISADVANTAGES: It joins the actor table before aggregating it which can lead to slightly more memory consumption
-SELECT 	act.first_name, 
-		act.last_name, 
-		COUNT(flm.film_id) as number_of_movies
-FROM public.actor act 
-INNER JOIN public.film_actor fct 	ON fct.actor_id = act.actor_id 
-INNER JOIN public.film flm 			ON flm.film_id  = fct.film_id 
-WHERE flm.release_year >= 2015
-GROUP BY 	act.actor_id , 
-			act.first_name, 
-			act.last_name 
-ORDER BY 	COUNT(flm.film_id) DESC,
-			act.actor_id ASC
+SELECT a.first_name, a.last_name, COUNT(f.film_id) as number_of_movies
+FROM actor a 
+INNER JOIN film_actor fa on fa.actor_id = a.actor_id 
+INNER JOIN film f ON f.film_id  = fa.film_id 
+WHERE f.release_year >= 2015
+GROUP BY a.actor_id 
+ORDER BY COUNT(f.film_id) DESC
 LIMIT 5;
 
 /*SOLUTION USING CTE - I would use this approach in production because it 
@@ -193,8 +186,7 @@ SELECT act.first_name,
        amc.number_of_movies 
 FROM public.actor act 
 INNER JOIN actor_movie_counts amc ON act.actor_id = amc.actor_id 
-ORDER BY 	amc.number_of_movies DESC,
-			act.actor_id ASC
+ORDER BY amc.number_of_movies DESC
 LIMIT 5;
 
 --SOLUTION USING SUBQUERIES
@@ -212,8 +204,7 @@ INNER JOIN (
     WHERE flm.release_year >= 2015
     GROUP BY fact.actor_id
 ) AS amc ON act.actor_id = amc.actor_id 
-ORDER BY amc.number_of_movies DESC,
-		act.actor_id 
+ORDER BY amc.number_of_movies DESC
 LIMIT 5;
 
 
@@ -236,34 +227,34 @@ Dealing with NULL values is encouraged)*/
  * the pivoting is handled with conditional aggregation(CASE WHEN). */
 --ADVANTAGES: Highly efficient because it scans the joined tables 
 --DISADVANTAGES: The SELECT claues becomes repetitive because of the multiple conditions in the CASE WHEN clause.
-SELECT flm.release_year , 
-		COALESCE(SUM(CASE WHEN cat.name = 'Drama' 	 	THEN 1 ELSE 0 END), 0) as number_of_drama_movies, 
-		COALESCE(SUM(CASE WHEN cat.name = 'Travel' 	 	THEN 1 ELSE 0 END), 0) as number_of_travel_movies, 
-		COALESCE(SUM(CASE WHEN cat.name = 'Documentary' 	THEN 1 ELSE 0 END), 0) as number_of_documentary_movies
-FROM public.film flm 
-INNER JOIN public.film_category fct 	ON flm.film_id = fct.film_id 
-INNER JOIN public.category 		cat 	ON cat.category_id = fct.category_id 
-WHERE cat.name IN ('Drama', 'Documentary', 'Travel')
-GROUP BY flm.release_year
-ORDER BY flm.release_year DESC;
+SELECT f.release_year , 
+		COALESCE(SUM(CASE WHEN UPPER(c.name) = 'DRAMA' 	 	THEN 1 ELSE 0 END), 0) as number_of_drama_movies, 
+		COALESCE(SUM(CASE WHEN UPPER(c.name) = 'TRAVEL' 	 	THEN 1 ELSE 0 END), 0) as number_of_travel_movies, 
+		COALESCE(SUM(CASE WHEN UPPER(c.name) = 'DOCUMENTARY' 	THEN 1 ELSE 0 END), 0) as number_of_documentary_movies
+FROM public.film f 
+INNER JOIN public.film_category fc 	ON f.film_id = fc.film_id 
+INNER JOIN public.category 		c 	ON c.category_id = fc.category_id 
+WHERE UPPER(c.name) IN ('DRAMA', 'DOCUMENTARY', 'TRAVEL')
+GROUP BY f.release_year
+ORDER BY f.release_year DESC;
 
 
 --SOLUTION USING CTE
 --ADVANTAGES: This approach isolates the filtering logic, creating a clean, pre-filtered dataset of the three targeted genres. Makes the main query much easier to read and maintain.
 --DISADVANTAGES: It introduces slight structural overhead by splitting a straightforward grouping task into two steps, which is completely unnecessary for a query of this size.
 WITH filtered_genres AS (
-	SELECT flm.release_year,
-			cat.name AS cat_name
-	FROM public.film flm 
-	INNER JOIN public.film_category fct 	ON flm.film_id 		= fct.film_id 
-	INNER JOIN public.category 		cat 	ON cat.category_id 	= fct.category_id 
-	WHERE cat.name IN ('Drama', 'Documentary', 'Travel')
+	SELECT f.release_year,
+			c.name AS cat_name
+	FROM public.film f 
+	INNER JOIN public.film_category fc 	ON f.film_id = fc.film_id 
+INNER JOIN public.category 			c 	ON c.category_id = fc.category_id 
+	WHERE UPPER(c.name) IN ('DRAMA', 'DOCUMENTARY', 'TRAVEL')
 	
 )
 SELECT fg.release_year , 
-		COALESCE(SUM(CASE WHEN fg.cat_name =  'Drama' 		THEN 1 ELSE 0 END), 0) as number_of_drama_movies, 
-		COALESCE(SUM(CASE WHEN fg.cat_name =  'Travel' 		THEN 1 ELSE 0 END), 0) as number_of_travel_movies, 
-		COALESCE(SUM(CASE WHEN fg.cat_name =  'Documentary' THEN 1 ELSE 0 END), 0) as number_of_documentary_movies
+		COALESCE(SUM(CASE WHEN UPPER(fg.cat_name) =  'DRAMA' 		THEN 1 ELSE 0 END), 0) as number_of_drama_movies, 
+		COALESCE(SUM(CASE WHEN UPPER(fg.cat_name) =  'TRAVEL' 		THEN 1 ELSE 0 END), 0) as number_of_travel_movies, 
+		COALESCE(SUM(CASE WHEN UPPER(fg.cat_name) =  'DOCUMENTARY' THEN 1 ELSE 0 END), 0) as number_of_documentary_movies
 FROM filtered_genres AS fg
 GROUP BY fg.release_year
 ORDER BY fg.release_year DESC;
@@ -273,9 +264,9 @@ ORDER BY fg.release_year DESC;
 --ADVANTAGES: By filtering the categories in the innermost query first, the database only joins a tiny fraction of the film_category table to the massive film table saving significant memory and CPU.
 --DISADVANTAGES:Poor readability, the deep nesting structure forces you to read the logic inside-out.
 SELECT flm.release_year , 
-		COALESCE(SUM(CASE WHEN fcat_genres.name = 'Drama' 		THEN 1 ELSE 0 END), 0) as number_of_drama_movies, 
-		COALESCE(SUM(CASE WHEN fcat_genres.name = 'Travel' 		THEN 1 ELSE 0 END), 0) as number_of_travel_movies, 
-		COALESCE(SUM(CASE WHEN fcat_genres.name = 'Documentary' THEN 1 ELSE 0 END), 0) as number_of_documentary_movies
+		COALESCE(SUM(CASE WHEN UPPER(fcat_genres.name) = 'DRAMA' 		THEN 1 ELSE 0 END), 0) as number_of_drama_movies, 
+		COALESCE(SUM(CASE WHEN UPPER(fcat_genres.name) = 'TRAVEL' 		THEN 1 ELSE 0 END), 0) as number_of_travel_movies, 
+		COALESCE(SUM(CASE WHEN UPPER(fcat_genres.name) = 'DOCUMENTARY' THEN 1 ELSE 0 END), 0) as number_of_documentary_movies
 FROM public.film flm 
 INNER JOIN (
 	SELECT fcat.film_id,
@@ -285,7 +276,7 @@ INNER JOIN (
 		SELECT 	cat.category_id,
 				cat.name
 		FROM public.category cat 
-		WHERE cat.name IN ('Drama', 'Documentary', 'Travel')
+		WHERE UPPER(cat.name) IN ('DRAMA', 'DOCUMENTARY', 'TRAVEL')
 	) AS fgenres 	ON fcat.category_id = fgenres.category_id 
 )AS fcat_genres 	ON flm.film_id 		= fcat_genres.film_id 
 GROUP BY flm.release_year
@@ -303,8 +294,7 @@ ORDER BY flm.release_year DESC;
 /*Assumptions: 
  * - staff could work in several stores in a year, please indicate which store the staff worked in (the last one);
  * - if staff processed the payment then he works in the same store; 
- * - take into account only payment_date
- * - JOIN Effect: INNER JOIN excludes staff members who processed no payments in 2017.*/
+ * - take into account only payment_date*/
 
 --SOLUTION USING CTE - The one I would use for a production environment. It would be much asier for a team of engineers to read, debug, and maintain over time. 
 --ADVANTAGES: It provides superior top-down readability. By isolating the total revenue calculation and the limit filter into a named block at the top, the main query remains a clean, easy-to-read sequence of joins.
@@ -332,9 +322,9 @@ SELECT (stf.first_name || ' ' || stf.last_name) AS full_name,
 		stf.staff_id,
 		lpay.total_revenue,
 		str.store_id 
-FROM public.staff stf
+FROM staff stf
 INNER JOIN last_payment lpay ON stf.staff_id = lpay.staff_id
-INNER JOIN public.store str ON stf.store_id = str.store_id 
+INNER JOIN store str ON stf.store_id = str.store_id 
 GROUP BY stf.first_name ,
 			stf.last_name,
 			stf.staff_id, 
@@ -387,12 +377,8 @@ ORDER BY top_staff.total_revenue DESC,
  * and their target audience age groups to optimize marketing efforts. 
  * Show which 5 movies were rented more than others (number of rentals), 
  * and what's the expected age of the audience for these movies? 
- * To determine expected age please use 'Motion Picture Association film rating system'
- * */
--- Assumptions & Interpretations:
--- 1. MPA rating mapped: G -> 'All ages', PG -> '7 and older', PG-13 -> '13 and older', R -> '17 and older', NC-17 -> '18 and older'.
--- 2. Output columns unified across all variants: film_title, rental_count, expected_age.
--- 3. JOIN Effect: INNER JOIN ensures only inventory items with completed rental records are counted.
+ * To determine expected age please use 'Motion Picture Association film rating system'*/
+
 /*SOLUTION USING CTE - I would use this solution, here the early aggregation is critical for performance.
  * The CTE does this flawlessly by identifying the 5 correct film_ids first, 
  * and only decodes the movie titles and ratings at the very end. 
@@ -410,8 +396,8 @@ WITH top_rented_movies AS (
     ORDER BY COUNT(ren.rental_id) DESC
     LIMIT 5
 )
-SELECT flm.title AS film_title,
-       trm.number_of_rentals AS rental_count,
+SELECT flm.title,
+       trm.number_of_rentals,
        CASE flm.rating
            WHEN 'G'     THEN 'All ages'
            WHEN 'PG'    THEN '7 and older'
@@ -422,37 +408,35 @@ SELECT flm.title AS film_title,
        END AS expected_age
 FROM top_rented_movies trm
 INNER JOIN public.film flm ON trm.film_id = flm.film_id
-ORDER BY trm.number_of_rentals DESC,
-		flm.film_id ASC;
+ORDER BY trm.number_of_rentals DESC;
 
 --SOLUTION USING JOIN
 -- ADVANTAGES: Uses standard, flat relational mapping with no nested structures.
 -- DISADVANTAGES: The database joins the massive 'rental' table before grouping the data. Additionally, we are forced to put `flm.title` and `flm.rating` into the `GROUP BY` clause, which consumes extra memory for sorting string values rather than just integers.
-SELECT flm.title 				AS film_title,
-		COUNT(rent.rental_id) 	AS rental_count,
-		CASE flm.rating	
-			WHEN 'G'     THEN 'All ages'
-			WHEN 'PG'    THEN '7 and older'
-           	WHEN 'PG-13' THEN '13 and older'
-           	WHEN 'R'     THEN '17 and older'
-           	WHEN 'NC-17' THEN '18 and older'
+SELECT flm.title,
+		COUNT(rent.rental_id) AS rental_count,
+		CASE flm.rating
+			WHEN 'G' THEN 'All ages'
+			WHEN 'PG' THEN 'Parental Guidance Suggested - 7 and older'
+			WHEN 'PG-13' THEN 'Parents Strongly Cautioned - 13 and older'
+			WHEN 'R' THEN 'Restricted - 17 and older'
+			WHEN 'NC-17' THEN 'Adults Only - over 18'
 			ELSE 'Unknown'
-		END 					AS expected_age
-FROM public.film flm 
-INNER JOIN public.inventory inv 	ON flm.film_id 		= inv.film_id 
-INNER JOIN public.rental 	rent 	ON inv.inventory_id = rent.inventory_id 
-GROUP BY 	flm.film_id,
+		END AS audience
+FROM film flm 
+INNER JOIN inventory inv ON flm.film_id = inv.film_id 
+INNER JOIN rental rent ON inv.inventory_id = rent.inventory_id 
+GROUP BY flm.film_id,
 			flm.title,
 			flm.rating 
-ORDER BY 	rental_count DESC,
-			flm.film_id ASC
+ORDER BY rental_count DESC
 LIMIT 5;
 
 --SOLUTION USING SUBQUERIES
 -- ADVANTAGES: Delivers the exact same high performance as the CTE by aggregating the `rental` table down to 5 rows internally before executing the `film` table join.
 -- DISADVANTAGES: It disrupts top-down readability and forces the reader to scan the middle of the query to understand how the top 5 filter is being applied.
-SELECT flm.title 						AS film_title,
-       top_rentals.number_of_rentals 	AS rental_count,
+SELECT flm.title,
+       top_rentals.number_of_rentals,
        CASE flm.rating
            WHEN 'G'     THEN 'All ages'
            WHEN 'PG'    THEN '7 and older'
@@ -460,7 +444,7 @@ SELECT flm.title 						AS film_title,
            WHEN 'R'     THEN '17 and older'
            WHEN 'NC-17' THEN '18 and older'
            ELSE 'Unknown'
-       END 								AS expected_age
+       END AS expected_age
 FROM public.film flm
 INNER JOIN (
     SELECT inv.film_id,
@@ -484,10 +468,7 @@ ORDER BY top_rentals.number_of_rentals DESC;
  * The task can be interpreted in various ways, and here are a few options (provide solutions for each one):
  * V1: gap between the latest release_year and current year per each actor;*/
  
--- Assumptions & Interpretations:
--- 1. Inactivity gap calculated as EXTRACT(YEAR FROM CURRENT_DATE) - MAX(release_year).
--- 2. Output columns unified across variants: first_name, last_name, latest_release_year, inactivity_gap.
--- 3. JOIN Effect: INNER JOIN excludes actors with no film associations.
+
 
 --SOLUTION USING SUBQUERIES (V1)
 -- ADVANTAGES: The aggregation is executed inside the subquery first, reducing data volume before joining.
@@ -495,7 +476,7 @@ ORDER BY top_rentals.number_of_rentals DESC;
 SELECT 
 	ac.first_name,
 	ac.last_name,
-	MAX(gap_years.release_year) AS latest_release_year,
+	MAX(gap_years.release_year),
 	EXTRACT(YEAR FROM current_date) - MAX(gap_years.release_year) AS gap
 FROM public.actor ac 
 INNER JOIN (
@@ -519,7 +500,7 @@ ORDER BY gap DESC;
 SELECT 
 	ac.first_name,
 	ac.last_name,
-	MAX(flm.release_year) AS latest_release_year,
+	MAX(flm.release_year),
 	EXTRACT(YEAR FROM current_date) - MAX(flm.release_year) AS gap
 FROM public.actor ac 
 INNER JOIN film_actor fa ON ac.actor_id = fa.actor_id 
@@ -527,7 +508,7 @@ INNER JOIN film flm ON fa.film_id = flm.film_id
 GROUP BY ac.actor_id, ac.first_name, ac.last_name 
 ORDER BY gap DESC;
 
---SOLUTION USING CTE (V1) - Production Choice
+--SOLUTION USING CTE (V1)
 --ADVANTAGES: Perfect top-down structure. Isolates the max release year aggregation step cleanly.
 --DISADVANTAGES: Slightly overheads the structure for such straightforward aggregate calculation.
 WITH actor_latest_year AS(
@@ -549,7 +530,7 @@ GROUP BY ac.actor_id, ac.first_name, ac.last_name
 ORDER BY gap DESC
 ;
 
--- -------------------V2-------------------------------
+-- --------------------PART 3-------------------------------
 
 /*The stores’ marketing team wants to analyze actors' inactivity periods 
  * to select those with notable career breaks for targeted promotional campaigns, 
@@ -562,11 +543,6 @@ ORDER BY gap DESC
  * There are two gaps - 5 years (2015-2010) and 7 years (2022-2015). 
  * We should find these gaps and return the greatest, in this case 7 years.
  */
--- Assumptions & Interpretations:
--- 1. Evaluates consecutive release years (Y2 - Y1) per actor and returns the MAX consecutive gap.
--- 2. JOIN Effect: INNER JOIN self-joins distinct release years where Y2 > Y1. 
---    Actors with films in only a single year produce no sequential pair and are filtered out via HAVING.
-
 
 --SOLUTION USING CTE (V2) - The only recommended one that I would actually use in production because it solves a multi-stage aggregation problem cleanly without violating SQL rules or compromising query performance.
 -- ADVANTAGES: Highly structured and readable. It isolates the deduplication step into a distinct block before performing the self-join, completely avoiding cartesian products from multiple same-year films.
@@ -631,9 +607,12 @@ HAVING MAX(
 ORDER BY max_inactivity_gap DESC,
          act.last_name      ASC;
 
--- EXPLANATION: WHY A PURE SINGLE JOIN SOLUTION IS NOT FEASIBLE FOR PART 3 - V2
--- Calculating consecutive gaps without window functions requires two sequential levels of aggregation:
---   1. Level 1 (Inner): MIN(Y2) for each release year Y1 per actor to compute consecutive gap (Y2 - Y1).
---   2. Level 2 (Outer): MAX() across all consecutive gaps for that actor.
--- Standard SQL syntax strictly forbids nesting aggregate functions (e.g., MAX(MIN(Y2) - Y1)) 
--- within a single GROUP BY expression. Therefore, CTEs or Subqueries are structurally required.
+-- WHY A PURE SINGLE JOIN IS NOT COMPATIBLE:
+-- A pure flat JOIN approach without CTEs, subqueries, or window functions is 
+-- technically impossible for Part 3 - V2. Finding the greatest consecutive gap 
+-- requires two sequential levels of aggregation:
+-- 1. Inner Aggregation: Computing MIN(Y2) for each release year Y1 per actor 
+--    to calculate individual consecutive gaps (Y2 - Y1).
+-- 2. Outer Aggregation: Calculating MAX() across all consecutive gaps for that actor.
+-- SQL standard syntax strictly prohibits nesting aggregate functions (e.g., MAX(MIN(Y2) - Y1)) 
+-- within a single GROUP BY clause. Therefore, CTEs are mandatory.
