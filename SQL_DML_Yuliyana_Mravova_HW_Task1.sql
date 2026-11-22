@@ -67,10 +67,10 @@ Fill in rental rates with 4.99, 9.99 and 19.99
 and rental durations with 1, 2 and 3 weeks respectively.*/
 
 /* We use a separate transaction for each film so if a films insert is unsuccessful the other ones are committed independently(isolation between transactions)
- * If the transaction fails the film is not inserted into the table and it is not being connected to the category table.
- * A rollback is possible and it affects the current transaction without interrupting the other running ones.
- * Referential integrity is preserved by filtering by the language and category name, not hardcoding it by the ID
- * My script avoids duplicates by using AND NOT EXISTS for each insert that is being executed.
+- If the transaction fails the film is not inserted into the table and it is not being connected to the category table.
+- A rollback is possible and it affects the current transaction without interrupting the other running ones.
+- Referential integrity is preserved by filtering by the language and category name, not hardcoding it by the ID
+- My script avoids duplicates by using AND NOT EXISTS for each insert that is being executed.
  */
 
 --1.Adding the first film 'Pirates of the Caribbean'
@@ -100,11 +100,11 @@ SELECT
     'PG-13'::public.mpaa_rating,
     CURRENT_DATE
 FROM public."language" lan 
-WHERE lan.name = 'English'
+WHERE UPPER(lan.name) = UPPER('English')
 AND NOT EXISTS(
 	SELECT 1
 	FROM public.film flm
-	WHERE flm.title = 'Pirates of the Caribbean: The Curse of the Black Pearl'
+	WHERE UPPER(flm.title) = UPPER('Pirates of the Caribbean: The Curse of the Black Pearl')
 		AND flm.release_year = 2003
 )
 RETURNING film_id;
@@ -113,8 +113,8 @@ RETURNING film_id;
 INSERT INTO public.film_category(film_id, category_id, last_update)
 SELECT flm.film_id, cat.category_id, CURRENT_DATE
 FROM public.film flm
-INNER JOIN public.category cat ON cat."name" = 'Action'
-WHERE flm.title = 'Pirates of the Caribbean: The Curse of the Black Pearl'
+INNER JOIN public.category cat ON UPPER(cat."name") = UPPER('Action')
+WHERE UPPER(flm.title) = UPPER('Pirates of the Caribbean: The Curse of the Black Pearl')
 AND NOT EXISTS (
 	SELECT 1
 	FROM public.film_category fc 
@@ -150,11 +150,11 @@ SELECT
     'PG-13',
     CURRENT_DATE
 FROM public."language" l 
-WHERE l."name" = 'English'
+WHERE UPPER(l."name") = UPPER('English')
 AND NOT EXISTS(
 	SELECT 1
 	FROM public.film f 
-	WHERE f.title = 'The Lord of the Rings: The Fellowship of the Ring'
+	WHERE UPPER(f.title) = UPPER('The Lord of the Rings: The Fellowship of the Ring')
 		AND f.release_year = 2001)
 RETURNING film_id;
 
@@ -165,8 +165,8 @@ SELECT
 	c.category_id,
 	now()
 FROM film f 
-INNER JOIN category c ON c."name" = 'Fantasy'
-WHERE f.title = 'The Lord of the Rings: The Fellowship of the Ring'
+INNER JOIN category c ON UPPER(c."name") = UPPER('Fantasy')
+WHERE UPPER(f.title) = UPPER('The Lord of the Rings: The Fellowship of the Ring')
 AND NOT EXISTS(
 	SELECT 1 
 	FROM public.film_category fc 
@@ -202,11 +202,11 @@ SELECT
     'PG',
     CURRENT_DATE
 FROM public."language" l 
-WHERE l."name" = 'English'
+WHERE UPPER(l."name") = UPPER('English')
 AND NOT EXISTS(
 SELECT 1
 FROM public.film f 
-WHERE f.title = 'Harry Potter and the Chamber of Secrets'
+WHERE UPPER(f.title) = UPPER('Harry Potter and the Chamber of Secrets')
 	AND f.release_year = 2002)
 RETURNING film_id;
 
@@ -217,8 +217,8 @@ SELECT
 	c.category_id,
 	now()
 FROM film f 
-INNER JOIN category c ON c."name" = 'Family'
-WHERE f.title = 'Harry Potter and the Chamber of Secrets'
+INNER JOIN category c ON UPPER(c."name") = UPPER('Family')
+WHERE UPPER(f.title) = UPPER('Harry Potter and the Chamber of Secrets')
 AND NOT EXISTS (
 SELECT 1 
 FROM film_category fc 
@@ -253,8 +253,8 @@ FROM (
 WHERE NOT EXISTS (
 	SELECT 1
 	FROM public.actor a 
-	WHERE a.first_name = new_actors.f_name 
-		AND a.last_name = new_actors.l_name )
+	WHERE UPPER(a.first_name) = UPPER(new_actors.f_name) 
+		AND UPPER(a.last_name) = UPPER(new_actors.l_name) )
 RETURNING actor_id, first_name, last_name;
 
 INSERT INTO public.film_actor (actor_id, film_id, last_update )
@@ -268,8 +268,8 @@ FROM (
         ('DANIEL', 'RADCLIFFE', 'Harry Potter and the Chamber of Secrets', 2002),
         ('EMMA', 'WATSON', 'Harry Potter and the Chamber of Secrets', 2002)
 ) AS map(first_name, last_name, film_title, release_year)
-JOIN public.actor a ON a.first_name = map.first_name AND a.last_name = map.last_name 
-JOIN public.film f ON f.title = map.film_title AND f.release_year = map.release_year 
+JOIN public.actor a ON UPPER(a.first_name) = UPPER(map.first_name) AND UPPER(a.last_name) = UPPER(map.last_name) 
+JOIN public.film f ON UPPER(f.title) = UPPER(map.film_title) AND f.release_year = map.release_year 
 WHERE NOT EXISTS(
 	SELECT 1
 	FROM public.film_actor fa 
@@ -292,7 +292,7 @@ FROM (
         ('The Lord of the Rings: The Fellowship of the Ring', 2001),
         ('Harry Potter and the Chamber of Secrets', 2002)
 ) AS new_films(title, release_year)
-JOIN public.film f ON f.title = new_films.title AND f.release_year = new_films.release_year 
+JOIN public.film f ON UPPER(f.title) = UPPER(new_films.title) AND f.release_year = new_films.release_year 
 CROSS JOIN (
 	SELECT MIN(s.store_id) AS store_id
 	FROM public.store s 
@@ -342,14 +342,14 @@ DELETE FROM public.payment
 WHERE customer_id = (
 	SELECT c.customer_id 
 	FROM public.customer c 
-	WHERE c.first_name = 'Yuliyana' AND c.last_name = 'Mravova')
+	WHERE UPPER(c.first_name) = UPPER('Yuliyana') AND UPPER(c.last_name) = UPPER('Mravova'))
 RETURNING payment_id, customer_id;
 
 DELETE FROM public.rental 
 WHERE customer_id = (
 	SELECT c.customer_id 
 	FROM public.customer c 
-	WHERE c.first_name = 'Yuliyana' AND c.last_name = 'Mravova')
+	WHERE UPPER(c.first_name) = UPPER('Yuliyana') AND UPPER(c.last_name) = UPPER('Mravova'))
 RETURNING rental_id, customer_id;
 
 COMMIT;
@@ -365,8 +365,8 @@ BEGIN;
 WITH targeted_customer AS(
 	SELECT c.customer_id 
 	FROM public.customer c 
-	WHERE c.first_name = 'Yuliyana'
-		AND c.last_name = 'Mravova'
+	WHERE UPPER(c.first_name) = UPPER('Yuliyana')
+		AND UPPER(c.last_name) = UPPER('Mravova')
 ),
 new_rentals AS(
 	INSERT INTO public.rental (
@@ -391,7 +391,7 @@ new_rentals AS(
             ('The Lord of the Rings: The Fellowship of the Ring', 2001),
             ('Harry Potter and the Chamber of Secrets', 2002)
 	) AS target_films(title, release_year)
-	INNER JOIN public.film f ON f.title = target_films.title AND f.release_year = target_films.release_year 
+	INNER JOIN public.film f ON UPPER(f.title) = UPPER(target_films.title) AND f.release_year = target_films.release_year 
 	INNER JOIN public.inventory i ON i.film_id = f.film_id 
 	INNER JOIN public.staff s ON s.store_id = i.store_id 
 	ON CONFLICT (rental_date, inventory_id, customer_id) DO NOTHING
@@ -428,20 +428,14 @@ FROM public.rental r
 JOIN public.customer c ON c.customer_id = r.customer_id
 JOIN public.inventory i ON i.inventory_id = r.inventory_id
 JOIN public.film f ON f.film_id = i.film_id
-WHERE c.first_name = 'Yuliyana' 
-  AND c.last_name = 'Mravova';
+WHERE UPPER(c.first_name) = UPPER('Yuliyana') 
+  AND UPPER(c.last_name) = UPPER('Mravova');
 
 SELECT f.title, i.inventory_id, i.store_id
 FROM public.film f
 LEFT JOIN public.inventory i ON i.film_id = f.film_id
-WHERE f.title IN (
-    'Pirates of the Caribbean: The Curse of the Black Pearl',
-    'The Lord of the Rings: The Fellowship of the Ring',
-    'Harry Potter and the Chamber of Secrets'
+WHERE UPPER(f.title) IN (
+    UPPER('Pirates of the Caribbean: The Curse of the Black Pearl'),
+    UPPER('The Lord of the Rings: The Fellowship of the Ring'),
+    UPPER('Harry Potter and the Chamber of Secrets')
 );
-
-
-	
-	
-	
-	
